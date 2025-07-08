@@ -1,128 +1,89 @@
 import discord
 from discord.ext import commands
-from discord import SelectOption
-import re
 
-# Sensitive words (English and Hindi)
-SENSITIVE_WORDS_ENGLISH = [
-    'damn', 'hell', 'fuck', 'shit', 'bitch', 'asshole', 'cunt', 'bastard',
-    'idiot', 'moron', 'stupid', 'retard', 'douche', 'jerk', 'faggot', 'nigger'
-    # Add more English words as needed
-]
+SENSITIVE_WORDS = ["badword", "anotherbadword"]  # Add your sensitive words here
+SENSITIVE_LINKS = ["discord.gg/", "bit.ly/", "t.me/"]  # Add patterns to detect
 
-SENSITIVE_WORDS_HINDI = [
-    'kutta', 'kutiya', 'harami', 'chutiya', 'bhenchod', 'madarchod',
-    'gandu', 'bakwas', 'bewakoof', 'chut', 'lund', 'gaand', 'bhosda',
-    'saala', 'kamchor', 'pagal'
-    # Add more Hindi words as needed
-]
+MOD_CHANNEL_ID = 1387165662975103139  # Change to your mod channel ID
 
-# Combine both lists
-SENSITIVE_WORDS = SENSITIVE_WORDS_ENGLISH + SENSITIVE_WORDS_HINDI
-
-# Comprehensive link pattern
-LINK_PATTERN = r'(?i)(?:https?://|www\.|bit\.ly|tinyurl\.com|t\.co|goo\.gl)[^\s]*'
-
-class ModerationSelect(discord.ui.Select):
-    def __init__(self, user, message, mod_message, mod_channel_id):
-        options = [
-            SelectOption(label="Warn", value="warn", description="Send a warning DM"),
-            SelectOption(label="Kick", value="kick", description="Kick user from server"),
-            SelectOption(label="Ban", value="ban", description="Ban user from server"),
-            SelectOption(label="Ignore", value="ignore", description="Take no action")
-        ]
-        super().__init__(placeholder="Select an action", options=options)
-        self.target_user = user
+class AutoModView(discord.ui.View):
+    def __init__(self, user, message, mod_channel, client):
+        super().__init__(timeout=None)
+        self.user = user
         self.message = message
-        self.mod_message = mod_message
-        self.mod_channel_id = mod_channel_id
+        self.mod_channel = mod_channel
+        self.client = client
 
-    async def callback(self, interaction: discord.Interaction):
-        action = self.values[0]
-        moderator = interaction.user
-        mod_channel = interaction.client.get_channel(self.mod_channel_id)
-
-        # Update embed
-        embed = self.mod_message.embeds[0]
-        embed.set_footer(
-            text=f"{action.capitalize()} by {moderator.display_name}",
-            icon_url=moderator.avatar.url if moderator.avatar else None
-        )
-
-        # Perform action
+    async def send_dm(self, user, content):
         try:
-            if action == "warn":
-                # Check if the user is still in the guild before sending DM
-                if self.target_user.guild: # This ensures it's a member, not just a user object
-                    await self.target_user.send(f"You have been warned for inappropriate content in {self.message.guild.name}.")
-                else:
-                    await mod_channel.send(f"Could not warn {self.target_user.mention}: User not found in guild.")
-            elif action == "kick":
-                if isinstance(self.target_user, discord.Member): # Ensure it's a Member object
-                    await self.target_user.send(f"You have been kicked from {self.message.guild.name} for inappropriate content.")
-                    await self.target_user.kick(reason="Inappropriate content")
-                else:
-                    await mod_channel.send(f"Could not kick {self.target_user.mention}: User is not a guild member.")
-            elif action == "ban":
-                if isinstance(self.target_user, discord.Member): # Ensure it's a Member object
-                    await self.target_user.send(f"You have been banned from {self.message.guild.name} for inappropriate content.")
-                    await self.target_user.ban(reason="Inappropriate content")
-                else:
-                    await mod_channel.send(f"Could not ban {self.target_user.mention}: User is not a guild member.")
-            elif action == "ignore":
-                pass
-        except discord.errors.Forbidden:
-            await mod_channel.send(f"Error: Bot lacks permission to {action} {self.target_user.mention} in this guild.")
-        except discord.errors.HTTPException as e:
-            await mod_channel.send(f"Error performing {action} on {self.target_user.mention}: {str(e)}")
+            await user.send(content)
+        except Exception:
+            pass  # User might have DMs off
 
+    async def take_action(self, interaction, action):
         # Remove dropdown
-        await self.mod_message.edit(embed=embed, view=None)
-        await interaction.response.defer()
-
-# This function will be called from bot.py
-async def handle_automod_message(client, message, mod_channel_id):
-    if message.author.bot:
-        return False # Indicate that automod didn't handle the message fully
-
-    # Check for sensitive words or links
-    content = message.content.lower()
-    has_sensitive_word = any(word in content for word in SENSITIVE_WORDS)
-    has_link = re.search(LINK_PATTERN, content)
-
-    if has_sensitive_word or has_link:
-        # Delete the message
-        try:
-            await message.delete()
-        except discord.errors.Forbidden:
-            print(f"Warning: Bot does not have permissions to delete messages in {message.channel.name}")
-            return True # Indicate automod handled the message (or tried to)
-
-        # Create embed for mod channel
-        embed = discord.Embed(
-            title="Auto-Mod Alert",
-            description="The following message was flagged and deleted:",
-            color=discord.Color.red(),
-            timestamp=discord.utils.utcnow()
+        self.clear_items()
+        # Set footer
+        embed = interaction.message.embeds[0]
+        embed.set_footer(
+            text=f"{action} by {interaction.user.display_name}",
+            icon_url=interaction.user.display_avatar.url,
         )
-        embed.add_field(name="User", value=message.author.mention, inline=False)
-        embed.add_field(name="Channel", value=message.channel.mention, inline=False)
-        embed.add_field(name="Content", value=f"```\n{message.content}\n```", inline=False)
-        embed.set_thumbnail(url=message.author.avatar.url if message.author.avatar else None)
-        embed.set_footer(text="Choose an action below")
+        await interaction.message.edit(embed=embed, view=None)
+        # Take action
+        if action == "Warn":
+            await self.send_dm(self.user, "You have been warned for breaking the server rules.")
+            await interaction.response.send_message("User has been warned.", ephemeral=True)
+        elif action == "Kick":
+            await self.send_dm(self.user, "You have been kicked for breaking the server rules.")
+            await self.user.kick(reason="AutoMod violation")
+            await interaction.response.send_message("User has been kicked.", ephemeral=True)
+        elif action == "Ban":
+            await self.send_dm(self.user, "You have been banned for breaking the server rules.")
+            await self.user.ban(reason="AutoMod violation")
+            await interaction.response.send_message("User has been banned.", ephemeral=True)
+        elif action == "Ignore":
+            await interaction.response.send_message("Ignored.", ephemeral=True)
 
-        # Create dropdown view
-        view = discord.ui.View(timeout=180) # Timeout for the dropdown
-        select = ModerationSelect(message.author, message, None, mod_channel_id)
-        view.add_item(select)
+    @discord.ui.select(
+        placeholder="Choose an action...",
+        options=[
+            discord.SelectOption(label="Warn", description="Warn the user via DM", emoji="⚠️"),
+            discord.SelectOption(label="Kick", description="Kick the user", emoji="👢"),
+            discord.SelectOption(label="Ban", description="Ban the user", emoji="🔨"),
+            discord.SelectOption(label="Ignore", description="Remove this menu", emoji="🚫"),
+        ],
+        custom_id="automod_dropdown"
+    )
+    async def select_callback(self, select, interaction: discord.Interaction):
+        action = select.values[0]
+        await self.take_action(interaction, action)
 
-        # Send to mod channel
-        mod_channel = client.get_channel(mod_channel_id)
-        if mod_channel:
-            mod_message = await mod_channel.send(embed=embed, view=view)
-            select.mod_message = mod_message
-        else:
-            print(f"Warning: Moderation channel with ID {mod_channel_id} not found.")
+async def check_message(message: discord.Message, client):
+    if message.author.bot:
+        return
 
-        return True # Indicate that automod handled this message
-    return False # Indicate that automod did not handle this message
+    # Detect sensitive words/links (case-insensitive)
+    lower_content = message.content.lower()
+    detected = any(word in lower_content for word in SENSITIVE_WORDS) or any(link in lower_content for link in SENSITIVE_LINKS)
+    if not detected:
+        return
+
+    # Delete offending message
+    await message.delete()
+
+    # Prepare embed
+    embed = discord.Embed(
+        title="Auto-Mod Alert",
+        color=discord.Color.red()
+    )
+    embed.add_field(name="User", value=message.author.mention, inline=True)
+    embed.add_field(name="Channel", value=message.channel.mention, inline=True)
+    embed.add_field(name="Content", value=discord.utils.escape_markdown(message.content), inline=False)
+    embed.set_thumbnail(url=message.author.display_avatar.url)
+    embed.set_footer(text="Choose an action below.")
+
+    # Send to mod channel with dropdown
+    mod_channel = message.guild.get_channel(MOD_CHANNEL_ID)
+    view = AutoModView(message.author, message, mod_channel, client)
+    await mod_channel.send(embed=embed, view=view)
