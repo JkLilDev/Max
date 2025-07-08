@@ -30,7 +30,7 @@ async def on_ready():
 
 @client.event
 async def on_message(message):
-    await check_message(message, client)  # <-- Add this line
+    await check_message(message, client)
     if message.author.bot:
         return
     if message.author.id != OWNER_ID:
