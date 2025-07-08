@@ -26,7 +26,7 @@ async def on_ready():
         status=discord.Status.invisible,
         activity=discord.Activity(type=discord.ActivityType.listening, name="JK")
     )
-    await setup_help_command(treedent, OWNER_ID)
+    await setup_help_command(tree, OWNER_ID)  # Fixed typo: treedent -> tree
     try:
         synced = await tree.sync()
         print(f"Synced {len(synced)} commands globally.")
