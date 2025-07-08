@@ -5,7 +5,7 @@ SENSITIVE_WORDS = ["badword", "anotherbadword"]
 SENSITIVE_LINKS = ["discord.gg/", "bit.ly/", "t.me/"]
 
 # Set your mod channel ID here (replace with your actual channel ID)
-MOD_CHANNEL_ID = 1234567890
+MOD_CHANNEL_ID = 1387165662975103139
 
 class AutoModView(discord.ui.View):
     def __init__(self, user, message, moderator, client):
