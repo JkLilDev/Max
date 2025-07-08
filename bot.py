@@ -3,6 +3,7 @@ import os
 from dotenv import load_dotenv
 from commands import handle_command, setup_help_command
 from keep_alive import keep_alive
+from automod import check_message  # <-- Add this import
 
 keep_alive()
 
@@ -29,6 +30,7 @@ async def on_ready():
 
 @client.event
 async def on_message(message):
+    await check_message(message, client)  # <-- Add this line
     if message.author.bot:
         return
     if message.author.id != OWNER_ID:
