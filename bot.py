@@ -21,8 +21,12 @@ tree = discord.app_commands.CommandTree(client)
 @client.event
 async def on_ready():
     print(f"✅ Bot is ready. Logged in as {client.user}")
-    await client.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name="JK"))
-    await setup_help_command(tree, OWNER_ID)
+    # Set bot status to invisible with "Listening to JK"
+    await client.change_presence(
+        status=discord.Status.invisible,
+        activity=discord.Activity(type=discord.ActivityType.listening, name="JK")
+    )
+    await setup_help_command(treedent, OWNER_ID)
     try:
         synced = await tree.sync()
         print(f"Synced {len(synced)} commands globally.")
