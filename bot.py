@@ -3,8 +3,6 @@ import os
 from dotenv import load_dotenv
 from commands import handle_command, setup_help_command
 from keep_alive import keep_alive
-# from automod import handle_automod_message # COMMENT THIS OUT
-# MOD_CHANNEL_ID = int(os.getenv("MOD_CHANNEL_ID")) # COMMENT THIS OUT
 
 keep_alive()
 
@@ -33,11 +31,6 @@ async def on_ready():
 async def on_message(message):
     if message.author.bot:
         return
-
-    # automod_handled = await handle_automod_message(client, message, MOD_CHANNEL_ID) # COMMENT THIS OUT
-    # if automod_handled: # COMMENT THIS OUT
-    #     return # COMMENT THIS OUT
-
     if message.author.id != OWNER_ID:
         return
     await handle_command(client, message, send_status)
