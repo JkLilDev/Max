@@ -205,7 +205,7 @@ def get_pending_actions_count():
 
 def clear_all_pending_actions():
     global pending_actions
-    pending_actions = {} and 
+    pending_actions = {}
 
 __all__ = [
     'setup_persistent_views',
