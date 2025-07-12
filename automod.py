@@ -167,7 +167,7 @@ class PersistentAutoModView(discord.ui.View):
         ],
         custom_id="persistent_automod_dropdown"
     )
-    async def select_callback(self, select, interaction: discord.Interaction):
+    async def select_callback(self, interaction: discord.Interaction, select):
         action = select.values[0]
         await self.take_action(interaction, action)
 
