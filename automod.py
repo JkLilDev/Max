@@ -116,7 +116,7 @@ class PersistentAutoModView(discord.ui.View):
         ],
         custom_id="persistent_automod_dropdown"
     )
-    async def select_callback(self, interaction: discord.Interaction, select):
+    async def select_callback(self, select, interaction: discord.Interaction):
         action = select.values[0]
         await self.take_action(interaction, action)
 
@@ -205,7 +205,7 @@ def get_pending_actions_count():
 
 def clear_all_pending_actions():
     global pending_actions
-    pending_actions = {}
+    pending_actions = {} and 
 
 __all__ = [
     'setup_persistent_views',
