@@ -5,41 +5,35 @@ import re
 import asyncio
 from discord.ext import commands
 from typing import Dict, Any, Optional
+import time
+import datetime
 
-# Set your mod channel ID here (replace with your actual channel ID)
 MOD_CHANNEL_ID = 1387165662975103139
 
-# Global storage for persistent view data
 pending_actions: Dict[str, Dict[str, Any]] = {}
 
-# Load configuration
 def load_config():
     try:
         with open('config.json', 'r', encoding='utf-8') as f:
             return json.load(f)
     except FileNotFoundError:
-        print("❌ config.json not found! Bot will not work without it.")
         return None
-    except json.JSONDecodeError as e:
-        print(f"❌ Error parsing config.json: {e}")
+    except json.JSONDecodeError:
         return None
 
 def save_pending_action(message_id: str, data: Dict[str, Any]):
-    """Save pending action data for persistence"""
     pending_actions[message_id] = data
 
 def get_pending_action(message_id: str) -> Optional[Dict[str, Any]]:
-    """Get pending action data"""
     return pending_actions.get(message_id)
 
 def remove_pending_action(message_id: str):
-    """Remove pending action data"""
     if message_id in pending_actions:
         del pending_actions[message_id]
 
 class PersistentAutoModView(discord.ui.View):
     def __init__(self, user_id: int = None, original_message: str = None, channel_id: int = None, guild_id: int = None, message_id: str = None):
-        super().__init__(timeout=None)  # No timeout for persistent views
+        super().__init__(timeout=None)
         self.user_id = user_id
         self.original_message = original_message
         self.channel_id = channel_id
@@ -47,23 +41,17 @@ class PersistentAutoModView(discord.ui.View):
         self.message_id = message_id
 
     async def send_dm(self, user, text):
-        """Send a DM to the user with error handling"""
         try:
             await user.send(text)
             return True
         except discord.Forbidden:
-            print(f"Cannot send DM to {user} - DMs disabled")
             return False
-        except Exception as e:
-            print(f"Error sending DM to {user}: {e}")
+        except Exception:
             return False
 
     async def take_action(self, interaction: discord.Interaction, action: str):
-        """Execute the selected moderation action"""
-        # Defer the response first to prevent timeout
         await interaction.response.defer(ephemeral=True)
-        
-        # Get data from stored pending actions if not available
+
         if not self.user_id and self.message_id:
             stored_data = get_pending_action(self.message_id)
             if stored_data:
@@ -71,99 +59,80 @@ class PersistentAutoModView(discord.ui.View):
                 self.original_message = stored_data.get('original_message')
                 self.channel_id = stored_data.get('channel_id')
                 self.guild_id = stored_data.get('guild_id')
-        
-        # Get the user and guild
+
         guild = interaction.guild
         user = guild.get_member(self.user_id) if self.user_id else None
 
         if not user:
-            await interaction.followup.send("❌ User not found in server.", ephemeral=True)
+            await interaction.followup.send("<a:Error:1393537029148639232> User not found in server.", ephemeral=True)
             return
+
+        embed = interaction.message.embeds[0]
+
+        # Role & permission checks before modifying embed or removing action
+        if action == "Kick":
+            if user.top_role >= guild.me.top_role:
+                await interaction.followup.send("<a:Error:1393537029148639232> Cannot kick user - they have a higher or equal role than the bot.", ephemeral=True)
+                return
+        if action == "Ban":
+            if user.top_role >= guild.me.top_role:
+                await interaction.followup.send("<a:Error:1393537029148639232> Cannot ban user - they have a higher or equal role than the bot.", ephemeral=True)
+                return
+            if user.guild_permissions.administrator:
+                await interaction.followup.send("<a:Error:1393537029148639232> Cannot ban user - they are an administrator.", ephemeral=True)
+                return
 
         # Remove dropdown and update embed
         self.clear_items()
-        embed = interaction.message.embeds[0]
-
-        # Update footer with action taken
+        embed.timestamp = discord.utils.utcnow()
         embed.set_footer(
-            text=f"{action} by {interaction.user.display_name} at {discord.utils.format_dt(discord.utils.utcnow(), 'F')}",
+            text=f"{action} by {interaction.user.display_name}",
             icon_url=interaction.user.display_avatar.url,
         )
 
-        # Update embed color based on action
         color_map = {
             "Ban": discord.Color.dark_red(),
             "Kick": discord.Color.orange(),
             "Warn": discord.Color.yellow(),
-            "Ignore": discord.Color.light_grey()
+            "Ignore": discord.Color.grey()
         }
-        embed.color = color_map.get(action, discord.Color.light_grey())
+        embed.color = color_map.get(action, discord.Color.grey())
 
-        # Update the message first
         try:
             await interaction.message.edit(embed=embed, view=None)
-        except Exception as e:
-            print(f"Error updating embed: {e}")
+        except Exception:
+            pass
 
-        # Remove from pending actions
         if self.message_id:
             remove_pending_action(self.message_id)
 
-        # Take action
+        # Only reply on failures (already handled above), so now only act
         if action == "Warn":
-            dm_sent = await self.send_dm(user, f"⚠️ You have been warned in **{guild.name}** for breaking the server rules.")
-            dm_status = " (DM sent)" if dm_sent else " (DM failed)"
-            await interaction.followup.send(f"✅ Warned {user.mention}{dm_status}.", ephemeral=True)
-
+            await self.send_dm(user, f"You have been warned in **{guild.name}** for breaking the server rules.")
         elif action == "Kick":
-            dm_sent = await self.send_dm(user, f"👢 You have been kicked from **{guild.name}** for breaking the server rules.")
+            await self.send_dm(user, f"You have been kicked from **{guild.name}** for breaking the server rules.")
             try:
-                # Check if bot can kick this user
-                if user.top_role >= guild.me.top_role:
-                    await interaction.followup.send("❌ Cannot kick user - they have a higher or equal role than the bot.", ephemeral=True)
-                    return
-                
                 await guild.kick(user, reason=f"AutoMod violation - Actioned by {interaction.user}")
-                dm_status = " (DM sent)" if dm_sent else " (DM failed)"
-                await interaction.followup.send(f"✅ Kicked {user.mention}{dm_status}.", ephemeral=True)
-            except discord.Forbidden:
-                await interaction.followup.send("❌ Failed to kick user - insufficient permissions or user has higher role.", ephemeral=True)
-            except discord.HTTPException as e:
-                await interaction.followup.send(f"❌ Failed to kick user: {str(e)}", ephemeral=True)
-
+            except Exception:
+                pass
         elif action == "Ban":
-            dm_sent = await self.send_dm(user, f"🔨 You have been banned from **{guild.name}** for breaking the server rules.")
+            await self.send_dm(user, f"You have been banned from **{guild.name}** for breaking the server rules.")
             try:
-                # Check if bot can ban this user
-                if user.top_role >= guild.me.top_role:
-                    await interaction.followup.send("❌ Cannot ban user - they have a higher or equal role than the bot.", ephemeral=True)
-                    return
-                
-                # Check if user is admin
-                if user.guild_permissions.administrator:
-                    await interaction.followup.send("❌ Cannot ban user - they are an administrator.", ephemeral=True)
-                    return
-                
                 await guild.ban(user, reason=f"AutoMod violation - Actioned by {interaction.user}", delete_message_days=0)
-                dm_status = " (DM sent)" if dm_sent else " (DM failed)"
-                await interaction.followup.send(f"✅ Banned {user.mention}{dm_status}.", ephemeral=True)
-            except discord.Forbidden:
-                await interaction.followup.send("❌ Failed to ban user - insufficient permissions or user has higher role.", ephemeral=True)
-            except discord.HTTPException as e:
-                await interaction.followup.send(f"❌ Failed to ban user: {str(e)}", ephemeral=True)
-
+            except Exception:
+                pass
         elif action == "Ignore":
-            await interaction.followup.send("✅ Alert ignored.", ephemeral=True)
+            pass  # No reply needed
 
     @discord.ui.select(
         placeholder="Choose an action...",
         min_values=1,
         max_values=1,
         options=[
-            discord.SelectOption(label="Warn", description="Warn user by DM", emoji="⚠️"),
-            discord.SelectOption(label="Kick", description="Kick user", emoji="👢"),
-            discord.SelectOption(label="Ban", description="Ban user", emoji="🔨"),
-            discord.SelectOption(label="Ignore", description="Remove this menu", emoji="🚫"),
+            discord.SelectOption(label="Warn", description="Warn user", emoji="<a:Error:1393537029148639232>"),
+            discord.SelectOption(label="Kick", description="Kick user", emoji="<a:Kick:1393539202783645696>"),
+            discord.SelectOption(label="Ban", description="Ban user", emoji="<a:Ban:1393539007648104580>"),
+            discord.SelectOption(label="Ignore", description="Ignore alert", emoji="<a:Sleep:1393538986697293994>"),
         ],
         custom_id="persistent_automod_dropdown"
     )
@@ -171,110 +140,65 @@ class PersistentAutoModView(discord.ui.View):
         action = select.values[0]
         await self.take_action(interaction, action)
 
-# Function to setup persistent views on bot startup
 async def setup_persistent_views(client):
-    """Call this function when the bot starts to re-add persistent views"""
-    # Create a generic persistent view handler
     view = PersistentAutoModView()
     client.add_view(view)
-    print("✅ Persistent AutoMod views setup complete")
-    
-    # Optional: Clean up old pending actions (you can implement this based on your needs)
-    # For now, we'll keep them in memory until the bot is restarted
 
 def contains_sensitive_content(text: str, config: dict) -> tuple:
-    """
-    Check if text contains sensitive content.
-    Returns (is_triggered, triggered_content, content_type)
-    """
     text_lower = text.lower()
-    
-    # Check sensitive words with word boundary matching
     for word in config.get("sensitive_words", []):
         word_lower = word.lower()
-        # Use word boundaries for better matching
         if re.search(r'\b' + re.escape(word_lower) + r'\b', text_lower):
             return True, word, "word"
-    
-    # Check sensitive links
     for link in config.get("sensitive_links", []):
         if link.lower() in text_lower:
             return True, link, "link"
-    
     return False, "", ""
 
 async def check_message(message: discord.Message, client):
-    """Main function to check messages for violations"""
-    # Don't check bot messages
     if message.author.bot:
         return
-
-    # Don't check if message is None or has no content
     if not message or not message.content:
         return
-
-    # Don't check if guild exists (DM messages don't have guilds)
     if not message.guild:
         return
-
-    # Load configuration
     config = load_config()
     if not config:
-        print("❌ Cannot load config.json - AutoMod disabled")
         return
-    
-    # Check for sensitive content
     is_triggered, triggered_content, content_type = contains_sensitive_content(message.content, config)
-
     if is_triggered:
-        print(f"🚨 AutoMod triggered by {content_type}: '{triggered_content}' in message from {message.author}")
-        
-        # Try to delete the message
         try:
             await message.delete()
-            print(f"✅ Deleted message from {message.author}")
         except discord.Forbidden:
-            print(f"❌ No permission to delete message in {message.channel}")
+            pass
         except discord.NotFound:
-            print("⚠️ Message already deleted")
-        except Exception as e:
-            print(f"❌ Error deleting message: {e}")
+            pass
+        except Exception:
+            pass
 
-        # Get mod channel
         mod_channel = message.guild.get_channel(MOD_CHANNEL_ID)
         if not mod_channel:
-            print(f"❌ Mod channel with ID {MOD_CHANNEL_ID} not found")
             return
 
-        # Create embed
         embed = discord.Embed(
-            title="🚨 Auto-Mod Alert",
+            title="<a:Alert:1393535690859479052> Auto-Mod Alert",
             color=discord.Color.red(),
             timestamp=message.created_at
         )
-        embed.add_field(name="User", value=f"{message.author.mention} ({message.author})", inline=True)
+        embed.add_field(name="User", value=f"{message.author.mention}", inline=True)
         embed.add_field(name="Channel", value=message.channel.mention, inline=True)
-        embed.add_field(name="User ID", value=str(message.author.id), inline=True)
-        embed.add_field(name="Triggered By", value=f"```{triggered_content}```", inline=True)
         embed.add_field(name="Content Type", value=content_type.title(), inline=True)
-        embed.add_field(name="Account Created", value=f"<t:{int(message.author.created_at.timestamp())}:R>", inline=True)
-        
-        # Handle joined_at safely
-        joined_at = "Unknown"
-        if hasattr(message.author, 'joined_at') and message.author.joined_at:
-            joined_at = f"<t:{int(message.author.joined_at.timestamp())}:R>"
-        embed.add_field(name="Joined Server", value=joined_at, inline=True)
-        
-        # Safely escape and truncate message content
         safe_content = discord.utils.escape_markdown(message.content)
         if len(safe_content) > 1000:
             safe_content = safe_content[:997] + "..."
         embed.add_field(name="Message Content", value=f"```{safe_content}```", inline=False)
-        
+        joined_at = "Unknown"
+        if hasattr(message.author, 'joined_at') and message.author.joined_at:
+            joined_at = f"<t:{int(message.author.joined_at.timestamp())}:R>"
+        embed.add_field(name="Joined Server", value=joined_at, inline=True)
         embed.set_thumbnail(url=message.author.display_avatar.url)
-        embed.set_footer(text="Choose an action below - This alert will persist across bot restarts")
+        embed.set_footer(text="Choose an action below.")
 
-        # Create persistent view
         view = PersistentAutoModView(
             user_id=message.author.id,
             original_message=message.content,
@@ -283,38 +207,26 @@ async def check_message(message: discord.Message, client):
         )
 
         try:
-            # Send the message and get the message object
             sent_message = await mod_channel.send(embed=embed, view=view)
-            
-            # Store the view data for persistence
             save_pending_action(str(sent_message.id), {
                 'user_id': message.author.id,
                 'original_message': message.content,
                 'channel_id': message.channel.id,
                 'guild_id': message.guild.id
             })
-            
-            # Update the view with the message ID
             view.message_id = str(sent_message.id)
-            
-            print(f"✅ Sent automod alert to {mod_channel}")
         except discord.Forbidden:
-            print(f"❌ No permission to send message in mod channel {mod_channel}")
-        except Exception as e:
-            print(f"❌ Error sending automod alert: {e}")
+            pass
+        except Exception:
+            pass
 
-# Additional helper functions for better management
 def get_pending_actions_count():
-    """Get the number of pending actions"""
     return len(pending_actions)
 
 def clear_all_pending_actions():
-    """Clear all pending actions (use with caution)"""
     global pending_actions
     pending_actions = {}
-    print("✅ All pending actions cleared")
 
-# Export the main functions for use in your bot
 __all__ = [
     'setup_persistent_views',
     'check_message',
