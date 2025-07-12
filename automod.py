@@ -69,19 +69,6 @@ class PersistentAutoModView(discord.ui.View):
 
         embed = interaction.message.embeds[0]
 
-        # Role & permission checks before modifying embed or removing action
-        if action == "Kick":
-            if user.top_role >= guild.me.top_role:
-                await interaction.followup.send("<a:Error:1393537029148639232> Cannot kick user - they have a higher or equal role than the bot.", ephemeral=True)
-                return
-        if action == "Ban":
-            if user.top_role >= guild.me.top_role:
-                await interaction.followup.send("<a:Error:1393537029148639232> Cannot ban user - they have a higher or equal role than the bot.", ephemeral=True)
-                return
-            if user.guild_permissions.administrator:
-                await interaction.followup.send("<a:Error:1393537029148639232> Cannot ban user - they are an administrator.", ephemeral=True)
-                return
-
         # Remove dropdown and update embed
         self.clear_items()
         embed.timestamp = discord.utils.utcnow()
@@ -91,8 +78,6 @@ class PersistentAutoModView(discord.ui.View):
         )
 
         color_map = {
-            "Ban": discord.Color.dark_red(),
-            "Kick": discord.Color.orange(),
             "Warn": discord.Color.yellow(),
             "Ignore": discord.Color.grey()
         }
@@ -108,19 +93,16 @@ class PersistentAutoModView(discord.ui.View):
 
         # Only reply on failures (already handled above), so now only act
         if action == "Warn":
-            await self.send_dm(user, f"You have been warned in **{guild.name}** for breaking the server rules.")
-        elif action == "Kick":
-            await self.send_dm(user, f"You have been kicked from **{guild.name}** for breaking the server rules.")
-            try:
-                await guild.kick(user, reason=f"AutoMod violation - Actioned by {interaction.user}")
-            except Exception:
-                pass
-        elif action == "Ban":
-            await self.send_dm(user, f"You have been banned from **{guild.name}** for breaking the server rules.")
-            try:
-                await guild.ban(user, reason=f"AutoMod violation - Actioned by {interaction.user}", delete_message_days=0)
-            except Exception:
-                pass
+            warning_message = (
+                f"🔔 **Warning: Rule Violation Detected**\n\n"
+                f"We have detected that you have violated one or more server rules in **{guild.name}**.\n\n"
+                f"📌 Please take a moment to read and understand our community guidelines in <#rules> to avoid further actions.\n\n"
+                f"⚠️ Continued violations may lead to stricter consequences, including timeouts, kicks, or bans.\n\n"
+                f"If you believe this was a mistake or need clarification, feel free to contact a staff member.\n\n"
+                f"— Moderation Team\n"
+                f"{guild.name}"
+            )
+            await self.send_dm(user, warning_message)
         elif action == "Ignore":
             pass  # No reply needed
 
@@ -130,8 +112,6 @@ class PersistentAutoModView(discord.ui.View):
         max_values=1,
         options=[
             discord.SelectOption(label="Warn", description="Warn user", emoji="<a:Error:1393537029148639232>"),
-            discord.SelectOption(label="Kick", description="Kick user", emoji="<a:Kick:1393539202783645696>"),
-            discord.SelectOption(label="Ban", description="Ban user", emoji="<a:Ban:1393539007648104580>"),
             discord.SelectOption(label="Ignore", description="Ignore alert", emoji="<a:Sleep:1393538986697293994>"),
         ],
         custom_id="persistent_automod_dropdown"
