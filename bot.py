@@ -3,7 +3,7 @@ import os
 from dotenv import load_dotenv
 from commands import handle_command, setup_help_command
 from keep_alive import keep_alive
-from automod import check_message  # <-- Add this import
+from automod import check_message, setup_persistent_views
 
 keep_alive()
 
@@ -22,6 +22,7 @@ async def on_ready():
     print(f"✅ Bot is ready. Logged in as {client.user}")
     await client.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name="JK"))
     await setup_help_command(tree, OWNER_ID)
+    await setup_persistent_views(client)  # Setup persistent automod views
     try:
         synced = await tree.sync()
         print(f"Synced {len(synced)} commands globally.")
@@ -30,7 +31,10 @@ async def on_ready():
 
 @client.event
 async def on_message(message):
+    # Check automod first (this runs for all messages)
     await check_message(message, client)
+    
+    # Then handle owner commands
     if message.author.bot:
         return
     if message.author.id != OWNER_ID:
