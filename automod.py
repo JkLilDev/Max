@@ -2,10 +2,15 @@ import discord
 import json
 import os
 import re
+import asyncio
 from discord.ext import commands
+from typing import Dict, Any, Optional
 
 # Set your mod channel ID here (replace with your actual channel ID)
 MOD_CHANNEL_ID = 1387165662975103139
+
+# Global storage for persistent view data
+pending_actions: Dict[str, Dict[str, Any]] = {}
 
 # Load configuration
 def load_config():
@@ -19,15 +24,30 @@ def load_config():
         print(f"❌ Error parsing config.json: {e}")
         return None
 
+def save_pending_action(message_id: str, data: Dict[str, Any]):
+    """Save pending action data for persistence"""
+    pending_actions[message_id] = data
+
+def get_pending_action(message_id: str) -> Optional[Dict[str, Any]]:
+    """Get pending action data"""
+    return pending_actions.get(message_id)
+
+def remove_pending_action(message_id: str):
+    """Remove pending action data"""
+    if message_id in pending_actions:
+        del pending_actions[message_id]
+
 class PersistentAutoModView(discord.ui.View):
-    def __init__(self, user_id: int, original_message: str, channel_id: int, guild_id: int):
+    def __init__(self, user_id: int = None, original_message: str = None, channel_id: int = None, guild_id: int = None, message_id: str = None):
         super().__init__(timeout=None)  # No timeout for persistent views
         self.user_id = user_id
         self.original_message = original_message
         self.channel_id = channel_id
         self.guild_id = guild_id
+        self.message_id = message_id
 
     async def send_dm(self, user, text):
+        """Send a DM to the user with error handling"""
         try:
             await user.send(text)
             return True
@@ -39,12 +59,22 @@ class PersistentAutoModView(discord.ui.View):
             return False
 
     async def take_action(self, interaction: discord.Interaction, action: str):
+        """Execute the selected moderation action"""
         # Defer the response first to prevent timeout
         await interaction.response.defer(ephemeral=True)
         
+        # Get data from stored pending actions if not available
+        if not self.user_id and self.message_id:
+            stored_data = get_pending_action(self.message_id)
+            if stored_data:
+                self.user_id = stored_data.get('user_id')
+                self.original_message = stored_data.get('original_message')
+                self.channel_id = stored_data.get('channel_id')
+                self.guild_id = stored_data.get('guild_id')
+        
         # Get the user and guild
         guild = interaction.guild
-        user = guild.get_member(self.user_id)
+        user = guild.get_member(self.user_id) if self.user_id else None
 
         if not user:
             await interaction.followup.send("❌ User not found in server.", ephemeral=True)
@@ -74,6 +104,10 @@ class PersistentAutoModView(discord.ui.View):
             await interaction.message.edit(embed=embed, view=None)
         except Exception as e:
             print(f"Error updating embed: {e}")
+
+        # Remove from pending actions
+        if self.message_id:
+            remove_pending_action(self.message_id)
 
         # Take action
         if action == "Warn":
@@ -140,10 +174,13 @@ class PersistentAutoModView(discord.ui.View):
 # Function to setup persistent views on bot startup
 async def setup_persistent_views(client):
     """Call this function when the bot starts to re-add persistent views"""
-    # Add a view with the custom_id to handle persistent interactions
-    view = PersistentAutoModView(0, "", 0, 0)  # Dummy view for persistence
+    # Create a generic persistent view handler
+    view = PersistentAutoModView()
     client.add_view(view)
     print("✅ Persistent AutoMod views setup complete")
+    
+    # Optional: Clean up old pending actions (you can implement this based on your needs)
+    # For now, we'll keep them in memory until the bot is restarted
 
 def contains_sensitive_content(text: str, config: dict) -> tuple:
     """
@@ -246,9 +283,43 @@ async def check_message(message: discord.Message, client):
         )
 
         try:
-            await mod_channel.send(embed=embed, view=view)
+            # Send the message and get the message object
+            sent_message = await mod_channel.send(embed=embed, view=view)
+            
+            # Store the view data for persistence
+            save_pending_action(str(sent_message.id), {
+                'user_id': message.author.id,
+                'original_message': message.content,
+                'channel_id': message.channel.id,
+                'guild_id': message.guild.id
+            })
+            
+            # Update the view with the message ID
+            view.message_id = str(sent_message.id)
+            
             print(f"✅ Sent automod alert to {mod_channel}")
         except discord.Forbidden:
             print(f"❌ No permission to send message in mod channel {mod_channel}")
         except Exception as e:
             print(f"❌ Error sending automod alert: {e}")
+
+# Additional helper functions for better management
+def get_pending_actions_count():
+    """Get the number of pending actions"""
+    return len(pending_actions)
+
+def clear_all_pending_actions():
+    """Clear all pending actions (use with caution)"""
+    global pending_actions
+    pending_actions = {}
+    print("✅ All pending actions cleared")
+
+# Export the main functions for use in your bot
+__all__ = [
+    'setup_persistent_views',
+    'check_message',
+    'PersistentAutoModView',
+    'load_config',
+    'get_pending_actions_count',
+    'clear_all_pending_actions'
+]
